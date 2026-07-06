@@ -32,10 +32,6 @@ export default function Leaderboard({ totals, onSelect }) {
                 <span className="block text-xs text-emerald-200/50">losses</span>
               </span>
               <span>
-                <b className="text-2xl font-extrabold tracking-tight">{p.games}</b>
-                <span className="block text-xs text-emerald-200/50">games</span>
-              </span>
-              <span>
                 <b className="text-2xl font-extrabold tracking-tight">{p.games > 0 ? `${Math.round(p.ratio * 100)}%` : "—"}</b>
                 <span className="block text-xs text-emerald-200/50">ratio</span>
               </span>
