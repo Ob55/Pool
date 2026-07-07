@@ -19,6 +19,47 @@ function title(i) {
   return `${t.emoji} "${t.title}"`;
 }
 
+// Recent form for a player: net result (W−L) of their last few entries, newest first.
+function formLine(name, results) {
+  const rows = [...results]
+    .filter((r) => r.player === name)
+    .sort(
+      (a, b) =>
+        gameDate(b).localeCompare(gameDate(a)) ||
+        new Date(b.created_at) - new Date(a.created_at)
+    )
+    .slice(0, 5);
+  if (rows.length === 0) return null;
+  const marks = rows.map((r) =>
+    r.wins > r.losses ? "🟢" : r.wins < r.losses ? "🔴" : "⚪"
+  );
+  return `${name}'s recent form (newest → oldest): ${marks.join(" ")} — ${rows
+    .map((r) => `${r.wins}W/${r.losses}L`)
+    .join(", ")}`;
+}
+
+// Insights the bot derives straight from whatever data is in the DB.
+function liveInsights(results, totals) {
+  const actives = totals.filter((p) => p.games > 0);
+  if (actives.length === 0) return null;
+  const busiest = [...actives].sort((a, b) => b.games - a.games)[0];
+  const sharpest = [...actives].sort((a, b) => b.ratio - a.ratio)[0];
+  const leader = actives[0];
+  const runnerUp = actives[1];
+  const bits = [
+    `${leader.name} leads with ${plural(leader.wins, "point")}${
+      runnerUp
+        ? leader.wins > runnerUp.wins
+          ? ` (${plural(leader.wins - runnerUp.wins, "point")} clear of ${runnerUp.name})`
+          : ` (tied with ${runnerUp.name} on points)`
+        : ""
+    }`,
+    `${busiest.name} has shown up the most with ${plural(busiest.games, "game")}`,
+    `${sharpest.name} has the sharpest win ratio at ${pct(sharpest.ratio)}`,
+  ];
+  return bits.join(". ") + ".";
+}
+
 function findPlayers(q) {
   const found = [];
   for (const p of PLAYERS) {
@@ -60,7 +101,7 @@ export function answerQuestion(question, results) {
     return `I'm Osso 🎱 — this scoreboard's resident referee. Ask me who's winning, why someone is ranked where they are, or any player's stats.`;
   }
   if (/help|what can you|how do (i|you) use/.test(q)) {
-    return `I can answer:\n• Who's winning / who's last\n• Why player X is ahead of player Y\n• Any player's points, losses, games or win ratio\n• Compare two players\n• How the ranking works\n• The penalty rule for missing a game\n• Total games played and recent results 🎱`;
+    return `I can answer:\n• Who's winning / who's last\n• Why player X is ahead of player Y\n• Any player's points, losses, games or win ratio\n• Compare two players\n• How the ranking works\n• A player's recent form / streak\n• The penalty rule for missing a game\n• Total games played and recent results 🎱`;
   }
 
   // Penalty rule for missing a game without an apology
@@ -153,6 +194,18 @@ export function answerQuestion(question, results) {
     );
   }
 
+  // Form / streaks / momentum — derived live from recent results
+  if (/form|streak|trend|hot|cold|momentum|improv|recent.*(play|perform)/.test(q)) {
+    if (named.length >= 1) {
+      const lines = named.map((n) => formLine(n, results)).filter(Boolean);
+      if (lines.length) return lines.join("\n");
+    }
+    const all = actives.map((p) => formLine(p.name, results)).filter(Boolean);
+    return all.length
+      ? "Recent form 🟢 win / 🔴 loss / ⚪ even:\n" + all.join("\n")
+      : `No games on record yet to read form from. 🎱`;
+  }
+
   // Single player questions (ratio, points, wins, losses, or just their name)
   if (named.length === 1) {
     const p = totals[rankOf[named[0]]];
@@ -180,5 +233,10 @@ export function answerQuestion(question, results) {
     );
   }
 
+  // Fallback: instead of a dead end, share a live insight straight from the data.
+  const insight = liveInsights(results, totals);
+  if (insight) {
+    return `I didn't quite catch that, but here's what the data says right now 🎱\n${insight}\nTry "who is winning?", "${totals[0].name}'s form", "compare Brian and Sam", or "show the standings".`;
+  }
   return `Hmm, I didn't catch that one. 🎱 Try asking "who is winning?", "why is ${totals[0].name} ahead of ${totals[totals.length - 1].name}?", "compare Brian and Sam", or "show the standings".`;
 }

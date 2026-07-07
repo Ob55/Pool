@@ -43,7 +43,10 @@ export default function ChatBot() {
       </button>
 
       {open && (
-        <div className="glass fixed bottom-24 right-5 z-30 flex h-[480px] max-h-[70vh] w-[calc(100vw-2.5rem)] max-w-sm flex-col overflow-hidden rounded-3xl">
+        <div
+          className="glass fixed bottom-24 right-5 z-30 flex h-[480px] max-h-[70vh] w-[calc(100vw-2.5rem)] max-w-sm flex-col overflow-hidden rounded-3xl"
+          style={{ background: "rgba(3, 18, 11, 0.92)" }}
+        >
           <div className="border-b border-white/10 px-5 py-4">
             <div className="font-bold tracking-tight">
               <span className="serif-accent text-lg">Osso</span> 🎱
