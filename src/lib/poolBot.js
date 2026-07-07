@@ -60,7 +60,12 @@ export function answerQuestion(question, results) {
     return `I'm Osso 🎱 — this scoreboard's resident referee. Ask me who's winning, why someone is ranked where they are, or any player's stats.`;
   }
   if (/help|what can you|how do (i|you) use/.test(q)) {
-    return `I can answer:\n• Who's winning / who's last\n• Why player X is ahead of player Y\n• Any player's points, losses, games or win ratio\n• Compare two players\n• How the ranking works\n• Total games played and recent results 🎱`;
+    return `I can answer:\n• Who's winning / who's last\n• Why player X is ahead of player Y\n• Any player's points, losses, games or win ratio\n• Compare two players\n• How the ranking works\n• The penalty rule for missing a game\n• Total games played and recent results 🎱`;
+  }
+
+  // Penalty rule for missing a game without an apology
+  if (/penalt|apolog|miss(ed|ing)?.*game|skip|no ?show|absent|didn.?t (show|come|turn up)|fine/.test(q)) {
+    return `Penalty rule ⚠️: if you miss a game and you're not there, you have 24 hours after the game has been played to submit your apology. No apology within 24h = a 5-loss penalty (5 losses added to your record). Niven is the first to ever be penalised — he picked up his first penalty on Sunday, 5 Jul, for missing a game without an apology. 🎱`;
   }
 
   // Colo's availability
