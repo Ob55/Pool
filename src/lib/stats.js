@@ -32,6 +32,32 @@ export function computeTotals(results) {
   );
 }
 
+// A simple overview of the top and bottom performer for each date in the results.
+export function computeOverviewByDate(results) {
+  const grouped = new Map();
+
+  for (const row of results) {
+    const day = gameDate(row);
+    if (!grouped.has(day)) {
+      grouped.set(day, []);
+    }
+    grouped.get(day).push(row);
+  }
+
+  return [...grouped.entries()]
+    .map(([day, rows]) => {
+      const totals = computeTotals(rows).filter((p) => p.games > 0);
+      if (totals.length === 0) return null;
+      return {
+        day,
+        first: totals[0],
+        last: totals[totals.length - 1],
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.day.localeCompare(b.day));
+}
+
 // Cumulative wins over time, one series point per game day.
 export function computeTimeline(results) {
   const sorted = [...results].sort(
