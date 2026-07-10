@@ -35,10 +35,10 @@ function OverviewPageContent() {
     <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
       <header className="rise">
         <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-          Overview <span className="serif-accent text-4xl sm:text-5xl">Results</span>
+          <span className="serif-accent text-4xl sm:text-5xl">Results</span>
         </h1>
         <p className="mt-1 text-sm text-emerald-100/50">
-          See the top and bottom player for each recorded date.
+          See who won and who lost on each recorded date.
         </p>
       </header>
 
@@ -53,8 +53,8 @@ function OverviewPageContent() {
               <thead className="border-b border-white/10 text-emerald-200/60">
                 <tr>
                   <th className="px-5 py-4 font-semibold">Date</th>
-                  <th className="px-5 py-4 font-semibold">Top</th>
-                  <th className="px-5 py-4 font-semibold">Bottom</th>
+                  <th className="px-5 py-4 font-semibold">Winner</th>
+                  <th className="px-5 py-4 font-semibold">Loser</th>
                 </tr>
               </thead>
               <tbody>
