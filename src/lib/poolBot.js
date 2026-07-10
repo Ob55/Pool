@@ -220,11 +220,21 @@ export function answerQuestion(question, results) {
     return `Head to head:\n• ${statLine(x)}\n• ${statLine(y)}\n${lead.name} is currently ranked higher (#${rankOf[lead.name] + 1} ${fmtTitle(lead)}). ${explainOrder(totals[Math.min(rankOf[x.name], rankOf[y.name])], totals[Math.max(rankOf[x.name], rankOf[y.name])]) ?? ""}`;
   }
 
+  if (/who.*(most|highest|biggest|worst).*loss|who.*(lost|lose).*(most|more)|who.*has.*(most|highest|biggest|worst).*loss/.test(q)) {
+    const p = [...actives].sort((a, b) => b.losses - a.losses)[0];
+    return `${p.name} has the most losses — ${plural(p.losses, "loss")} out of ${plural(p.games, "game")}.`;
+  }
+
+  if (/who.*(fewest|least|lowest|smallest).*loss|who.*has.*(fewest|least|lowest|smallest).*loss/.test(q)) {
+    const p = [...actives].sort((a, b) => a.losses - b.losses)[0];
+    return `${p.name} has the fewest losses — ${plural(p.losses, "loss")} out of ${plural(p.games, "game")}.`;
+  }
+
   // Who is winning / leader / tonkaaa
   if (/who.*(winning|leading|best|first|top|number ?1|overall)|tonkaa|winner|champion/.test(q)) {
     const p = actives[0];
     const runnerUp = actives[1];
-    return `${fmtTitle(p)} goes to ${p.name}! ${statLine(p)}. ${
+    return `${fmtTitle(p)} goes to ${p.name}! ${p.name} is currently number 1. ${statLine(p)}. ${
       runnerUp
         ? p.wins - runnerUp.wins > 0
           ? `That's ${plural(p.wins - runnerUp.wins, "point")} clear of ${runnerUp.name}.`
@@ -395,7 +405,7 @@ export function answerQuestion(question, results) {
   // Fallback: instead of a dead end, share a live insight straight from the data.
   const insight = liveInsights(results, totals);
   if (insight) {
-    return `I didn't quite catch that, but here's what the data says right now 🎱\n${insight}\nTry "who is winning?", "${totals[0].name}'s form", "compare Brian and Sam", or "show the standings".`;
+    return `I didn't quite catch that, but here's what the data says right now 🎱\n${insight}`;
   }
-  return `Hmm, I didn't catch that one. 🎱 Try asking "who is winning?", "why is ${totals[0].name} ahead of ${totals[totals.length - 1].name}?", "compare Brian and Sam", or "show the standings".`;
+  return `I can answer questions about the standings, player records, recent form, comparisons, dates, and the penalty rule. Ask me something specific about the pool table. 🎱`;
 }
