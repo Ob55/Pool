@@ -7,34 +7,144 @@ const pct = (r) => `${Math.round(r * 100)}%`;
 const plural = (n, word, pluralWord = `${word}s`) =>
   `${n} ${n === 1 ? word : pluralWord}`;
 
-function normalizeText(text) {
-  const typoMap = {
-    appolog: "apology",
-    appoligy: "apology",
-    appolify: "apology",
-    apolog: "apology",
-    penality: "penalty",
-    penelty: "penalty",
-    penalti: "penalty",
-    penatly: "penalty",
-    standng: "standing",
-    standin: "standing",
-    rankng: "ranking",
-    ratrio: "ratio",
-    winratio: "ratio",
-    winnng: "winning",
-    winn: "win",
-    losss: "loss",
-    losng: "loss",
-    whos: "who is",
-    whats: "what is",
-    doesnt: "does not",
-  };
+// Straight substitutions for common shorthand and mangled spellings that
+// Levenshtein alone wouldn't reliably land on.
+const TYPO_MAP = {
+  appolog: "apology",
+  appoligy: "apology",
+  appolify: "apology",
+  apolog: "apology",
+  apoligies: "apologies",
+  penality: "penalty",
+  penelty: "penalty",
+  penalti: "penalty",
+  penatly: "penalty",
+  standng: "standing",
+  standin: "standing",
+  rankng: "ranking",
+  ratrio: "ratio",
+  winratio: "ratio",
+  winnng: "winning",
+  winn: "win",
+  losss: "loss",
+  losng: "loss",
+  whos: "who is",
+  whats: "what is",
+  hos: "who is",
+  wo: "who",
+  wining: "winning",
+  loosing: "losing",
+  loose: "lose",
+  looses: "loses",
+  doesnt: "does not",
+  dont: "do not",
+  cant: "can not",
+  pls: "please",
+  u: "you",
+  ur: "your",
+  vs: "versus",
+  wat: "what",
+  wut: "what",
+  hw: "how",
+  y: "why",
+};
 
+// Domain vocabulary the fuzzy corrector snaps mistyped words back to.
+// Player names live here too, so "Brain"/"Nivin"/"Alvn" resolve correctly.
+const VOCAB = [
+  // player names
+  "alvin", "brian", "niven", "sam", "colo",
+  // question words + intents
+  "who", "how", "why", "what", "which", "where", "when", "does", "is", "are",
+  "winning", "win", "wins", "winner", "won", "champion", "leading", "leader",
+  "loss", "losses", "lose", "loses", "lost", "losing",
+  "ratio", "percent", "percentage", "average",
+  "point", "points", "score", "scores", "record", "records",
+  "rank", "ranking", "ranked", "rankings", "position", "place",
+  "standing", "standings", "leaderboard", "table", "board", "order",
+  "most", "least", "fewest", "highest", "lowest", "biggest", "smallest",
+  "best", "worst", "sharpest", "top", "bottom", "better", "than",
+  "first", "second", "third", "last", "podium", "overall", "number",
+  "penalty", "penalties", "apology", "apologies", "sorry", "fine", "miss",
+  "missed", "missing", "absent", "skip", "skipped",
+  "form", "streak", "momentum", "trend", "hot", "cold",
+  "game", "games", "match", "matches", "session", "sessions", "played", "play",
+  "compare", "comparison", "against", "versus", "beat", "beating", "beats",
+  "ahead", "behind", "front", "above", "below",
+  "everyone", "player", "players", "stats", "summary", "everybody",
+  "recent", "latest", "today", "yesterday", "date", "happened", "results",
+  "result", "available", "around", "tell", "about", "info", "details",
+];
+const VOCAB_SET = new Set(VOCAB);
+
+// Common English words we must never "correct" — they're valid as-is and
+// happen to sit one edit away from a domain word (e.g. "show" → "how").
+const PROTECTED = new Set([
+  "show", "have", "has", "had", "many", "much", "does", "did", "done",
+  "get", "got", "are", "was", "were", "will", "would", "should", "could",
+  "come", "came", "make", "made", "some", "same", "they", "them", "then",
+  "this", "that", "there", "here", "been", "being", "into", "over", "only",
+  "also", "when", "your", "you", "our", "his", "her", "him", "she", "with",
+  "from", "just", "like", "want", "know", "need", "give", "each", "any",
+  "all", "not", "but", "and", "for", "the", "out", "now", "day", "days",
+  "week", "still", "back", "good", "great", "nice", "cool", "please",
+]);
+
+// Damerau optimal-string-alignment distance: like Levenshtein but adjacent
+// transpositions cost 1, so "brain"→"brian" and "wininng"→"winning" resolve.
+function editDistance(a, b, cap) {
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > cap) return cap + 1;
+  const d = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) d[i][0] = i;
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    let rowMin = Infinity;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      }
+      if (d[i][j] < rowMin) rowMin = d[i][j];
+    }
+    if (rowMin > cap) return cap + 1;
+  }
+  return d[m][n];
+}
+
+// Snap a single mistyped token to the closest domain word, when it's a
+// confident match. Conservative thresholds keep valid English untouched.
+function correctToken(token) {
+  if (token.length < 4 || VOCAB_SET.has(token) || PROTECTED.has(token)) return token;
+  const cap = token.length <= 5 ? 1 : 2;
+  let best = null;
+  let bestDist = cap + 1;
+  for (const word of VOCAB) {
+    if (Math.abs(word.length - token.length) > cap) continue;
+    const d = editDistance(token, word, cap);
+    if (d < bestDist) {
+      bestDist = d;
+      best = word;
+      if (d === 0) break;
+    }
+  }
+  return best && bestDist <= cap ? best : token;
+}
+
+function normalizeText(text) {
   let value = text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  for (const [from, to] of Object.entries(typoMap)) {
+  for (const [from, to] of Object.entries(TYPO_MAP)) {
     value = value.replace(new RegExp(`\\b${from}\\b`, "g"), to);
   }
+  // Fuzzy-correct the remaining tokens against the domain vocabulary so
+  // typos like "how has most win" or "who is wininng" still resolve.
+  value = value
+    .split(" ")
+    .filter(Boolean)
+    .map(correctToken)
+    .join(" ");
   return value;
 }
 
@@ -64,7 +174,8 @@ function formatDate(day) {
 }
 
 function extractDate(q) {
-  const match = q.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  // Separators may be /, -, ., or spaces (normalizeText strips punctuation).
+  const match = q.match(/\b(\d{1,2})[\/\-. ](\d{1,2})[\/\-. ](\d{2,4})\b/);
   if (!match) return null;
   const [, day, month, year] = match;
   const fullYear = year.length === 2 ? `20${year}` : year;
@@ -170,6 +281,15 @@ export function answerQuestion(question, results) {
     return `I can answer:\n• Who's winning / who's last\n• Why player X is ahead of player Y\n• Any player's points, losses, games or win ratio\n• Compare two players\n• What happened on a specific date\n• How the ranking works\n• Recent form and the penalty rule 🎱`;
   }
 
+  // Someone actually apologising (not asking about the rule) → acknowledge,
+  // no penalty. We only treat it as an apology when there's no rule/question
+  // framing around it, so "what is the penalty rule?" still gets explained.
+  const apologyIntent = /\b(sorry|apology|apologies|apologise|apologize|my bad|forgive|excuse me|i was (out|away|absent)|couldn.?t (make|come|attend)|wont? make it|will not make it)\b/.test(q);
+  const rulePhrasing = /\b(rule|penalty|penalties|penal|fine|what|how|explain|does|work|when|why)\b/.test(q);
+  if (apologyIntent && !rulePhrasing) {
+    return `Apology noted ✅ — no penalty for you. As long as it lands within 24 hours of the game, you're fully covered and nothing is added to your record. Thanks for the heads up! 🎱`;
+  }
+
   // Penalty rule for missing a game without an apology
   if (/penalt|apolog|miss(ed|ing)?.*game|skip|no ?show|absent|didn.?t (show|come|turn up)|fine/.test(q) || containsAny(q, ["apology", "penalty", "penal", "fine", "no penalty", "no penal", "should not be penalized"])) {
     return `Penalty rule ⚠️: if you miss a game and you're not there, you have 24 hours after the game has been played to submit your apology. If you send the apology within 24 hours, there is no penalty. If you do not, it becomes a 5-loss penalty (5 losses added to your record). Niven is the first to ever be penalised — he picked up his first penalty on Sunday, 5 Jul, for missing a game without an apology. 🎱`;
@@ -180,12 +300,17 @@ export function answerQuestion(question, results) {
     return `Colo is N/A most days — he rarely makes it to the table. When adding results, he's marked N/A by default; nothing is added or removed for him unless he actually plays. 🎱`;
   }
 
-  // Ranking rules
-  if (/\bhow\b.*(rank|standing|point|score|calculat|work)|what.*(rule|point system)/.test(q)) {
+  // Ranking rules — only when it's a general "how does ranking work" question,
+  // not "how many points does <player> have" (that names a player).
+  if (
+    !named.length &&
+    !/how many|how much/.test(q) &&
+    /\bhow\b.*(rank|standing|point|score|calculat|work)|what.*(rule|point system)/.test(q)
+  ) {
     return `Here's how it works: every game win = 1 point. Players are ranked by total points; ties are broken by win ratio (wins ÷ games played), then fewer losses, then more games played. The titles go: #1 ${title(0)}, #2 ${title(1)}, #3 ${title(2)}, and last place is ${title(PLAYERS.length - 1)}. 🏆`;
   }
 
-  if (/system|tracker|website|site|app|how does this work|end to end|what does this do|what can this app do|how does the system work/.test(q)) {
+  if (/system|tracker|website|\bsite\b|\bapp\b|how does this work|end to end|what does this do|what can this app do|how does the system work/.test(q)) {
     return `This pool tracker is a simple results system: you add game results on the Details page, the leaderboard updates automatically, the Dashboard shows the overall standings and charts, the Overview page shows the top and bottom player for each date, and I answer questions about players, ranking, dates, recent form, and the rules. 🎱`;
   }
 
@@ -222,12 +347,52 @@ export function answerQuestion(question, results) {
 
   if (/who.*(most|highest|biggest|worst).*loss|who.*(lost|lose).*(most|more)|who.*has.*(most|highest|biggest|worst).*loss/.test(q)) {
     const p = [...actives].sort((a, b) => b.losses - a.losses)[0];
-    return `${p.name} has the most losses — ${plural(p.losses, "loss")} out of ${plural(p.games, "game")}.`;
+    return `${p.name} has the most losses — ${plural(p.losses, "loss", "losses")} out of ${plural(p.games, "game")}.`;
   }
 
   if (/who.*(fewest|least|lowest|smallest).*loss|who.*has.*(fewest|least|lowest|smallest).*loss/.test(q)) {
     const p = [...actives].sort((a, b) => a.losses - b.losses)[0];
-    return `${p.name} has the fewest losses — ${plural(p.losses, "loss")} out of ${plural(p.games, "game")}.`;
+    return `${p.name} has the fewest losses — ${plural(p.losses, "loss", "losses")} out of ${plural(p.games, "game")}.`;
+  }
+
+  // Best / worst ratio and game-count superlatives. These run before the
+  // generic "who is winning" handler so "who has the best ratio" isn't
+  // swallowed by the word "best", and "worst ratio" isn't caught by "worst".
+  if (/(who|which|whos).*(best|highest|sharpest).*ratio|which player.*ratio/.test(q)) {
+    const p = [...actives].sort((a, b) => b.ratio - a.ratio)[0];
+    return `${p.name} has the best win ratio at ${pct(p.ratio)} from ${plural(p.games, "game")}.`;
+  }
+
+  if (/(who|which|whos).*(worst|lowest|poorest).*ratio/.test(q)) {
+    const p = [...actives].sort((a, b) => a.ratio - b.ratio)[0];
+    return `${p.name} has the lowest win ratio at ${pct(p.ratio)} from ${plural(p.games, "game")}.`;
+  }
+
+  if (/(who|which|whos).*(most|highest|more).*game|who has played the most games|most appearances/.test(q)) {
+    const p = [...actives].sort((a, b) => b.games - a.games)[0];
+    return `${p.name} has played the most games — ${plural(p.games, "game")}.`;
+  }
+
+  if (/(who|which|whos).*(fewest|least|lowest).*game|fewest games/.test(q)) {
+    const p = [...actives].sort((a, b) => a.games - b.games)[0];
+    return `${p.name} has played the fewest games — ${plural(p.games, "game")}.`;
+  }
+
+  // Who has the most wins / points (this is the leader, but users phrase it
+  // as "who has most wins" — which used to fall through to the fallback).
+  if (/(who|how|which|whos).*(most|highest|biggest|more).*(win|point|score)/.test(q)) {
+    const p = actives[0];
+    const runnerUp = actives[1];
+    return `${p.name} has the most points — ${plural(p.wins, "point")} from ${plural(p.games, "game")}${
+      runnerUp && p.wins > runnerUp.wins
+        ? `, ${plural(p.wins - runnerUp.wins, "point")} ahead of ${runnerUp.name}`
+        : ""
+    }. That puts ${p.name} top as ${fmtTitle(p)}. 🏆`;
+  }
+
+  if (/(who|how|which|whos).*(fewest|least|lowest|smallest).*(win|point|score)/.test(q)) {
+    const p = [...actives].sort((a, b) => a.wins - b.wins || a.ratio - b.ratio)[0];
+    return `${p.name} has the fewest points — ${plural(p.wins, "point")} from ${plural(p.games, "game")}.`;
   }
 
   // Who is winning / leader / tonkaaa
@@ -252,27 +417,6 @@ export function answerQuestion(question, results) {
   if (/who.*(third|3rd|good job)/.test(q)) {
     const p = actives[2] ?? totals[2];
     return `${fmtTitle(p)} ${p.name} is in third place. ${statLine(p)}.`;
-  }
-
-  // Best / worst ratio and game count questions
-  if (/who.*(best|highest|sharpest).*ratio|which player.*ratio/.test(q)) {
-    const p = [...actives].sort((a, b) => b.ratio - a.ratio)[0];
-    return `${p.name} has the best win ratio at ${pct(p.ratio)} from ${plural(p.games, "game")}.`;
-  }
-
-  if (/who.*(worst|lowest).*ratio/.test(q)) {
-    const p = [...actives].sort((a, b) => a.ratio - b.ratio)[0];
-    return `${p.name} has the lowest win ratio at ${pct(p.ratio)}.`;
-  }
-
-  if (/who.*(most|highest).*game|who has played the most games|most appearances/.test(q)) {
-    const p = [...actives].sort((a, b) => b.games - a.games)[0];
-    return `${p.name} has played the most games — ${plural(p.games, "game")}.`;
-  }
-
-  if (/who.*(fewest|least|lowest).*game|fewest games/.test(q)) {
-    const p = [...actives].sort((a, b) => a.games - b.games)[0];
-    return `${p.name} has played the fewest games — ${plural(p.games, "game")}.`;
   }
 
   // Top three / bottom three
@@ -340,8 +484,11 @@ export function answerQuestion(question, results) {
     return `There are ${games} game results on the board across ${results.length} recorded entries. 🎱`;
   }
 
-  // Recent results
-  if (/recent|latest|last (game|result|session)|yesterday|today/.test(q)) {
+  // Recent results (but "recent form" should show the form view below)
+  if (
+    !/form|streak|trend|momentum|hot|cold/.test(q) &&
+    /recent|latest|last (game|result|session)|yesterday|today/.test(q)
+  ) {
     const recent = [...results]
       .sort(
         (a, b) =>
